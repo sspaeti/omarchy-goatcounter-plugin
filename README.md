@@ -51,19 +51,25 @@ never the whole file, and never prints tokens.
 ### 3. Install
 
 ```sh
-DEST=~/.config/omarchy/plugins/sspaeti.goatcounter
-mkdir -p "$DEST"
-cp manifest.json BarWidget.qml Panel.qml Model.js fetch.sh LICENSE "$DEST"/
-sed -i 's/io\.github\.sspaeti\.goatcounter/sspaeti.goatcounter/g' \
-  "$DEST"/manifest.json "$DEST"/BarWidget.qml "$DEST"/Panel.qml
-chmod +x "$DEST"/fetch.sh
+omarchy plugin add https://github.com/sspaeti/omarchy-goatcounter-plugin.git --enable
 ```
 
-Then add it to the bar in `~/.config/omarchy/shell.json`:
+Then add it to the bar, either with
+`omarchy bar move io.github.sspaeti.goatcounter --section right` or on the
+widget entry in `~/.config/omarchy/shell.json`:
 
 ```json
-{ "id": "sspaeti.goatcounter" }
+{ "id": "io.github.sspaeti.goatcounter" }
 ```
+
+### Remove
+
+```sh
+omarchy plugin remove io.github.sspaeti.goatcounter
+```
+
+Cached stats live in `~/.local/state/omarchy/goatcounter/` — delete that
+folder too for a full cleanup. Your secrets file is never touched.
 
 ## Usage
 
@@ -73,8 +79,8 @@ Then add it to the bar in `~/.config/omarchy/shell.json`:
 - **Middle click**: force a refresh
 - **Right click**: open the active site's GoatCounter dashboard in the browser
 
-IPC: `omarchy-shell shell toggle sspaeti.goatcounter` — bind it in
-Hyprland, e.g. `o.bind("SUPER + CTRL + G", "GoatCounter stats", "omarchy-shell shell toggle sspaeti.goatcounter")`.
+IPC: `omarchy-shell shell toggle io.github.sspaeti.goatcounter` — bind it in
+Hyprland, e.g. `o.bind("SUPER + CTRL + G", "GoatCounter stats", "omarchy-shell shell toggle io.github.sspaeti.goatcounter")`.
 
 ## Settings
 
@@ -93,7 +99,7 @@ Example:
 
 ```json
 {
-  "id": "sspaeti.goatcounter",
+  "id": "io.github.sspaeti.goatcounter",
   "siteLabels": { "blog": "Blog" },
   "alertHourlyViews": { "ssp.sh": 300, "blog": 50 },
   "alertDailyViews": { "ssp.sh": 4000, "blog": 100 }
