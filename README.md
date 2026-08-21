@@ -8,8 +8,11 @@ chart icon that expands to your weekly totals on hover, and a popup with a
 systems, and languages. Supports any number of sites with a tab switcher,
 plus optional "going viral" notifications.
 
-Stats are fetched in the background every 15 minutes and cached on disk, so
-opening the panel is always instant.
+Stats are fetched in the background (every 15 minutes by default) and cached
+on disk, so opening the panel is always instant. Views that arrived since
+you last opened the panel are stacked as a brighter cap on top of each bar,
+with a "+N since last open" summary in the header — a quick glance shows
+what's new.
 
 Left Mouse Click Preview:
 ![preview](preview.png)
@@ -103,9 +106,10 @@ All optional, on the widget entry in `shell.json`:
 | `icon` | `󰄨` | Bar icon |
 | `hoverExpand` | `true` | Expand the pill with weekly totals on hover; `false` keeps it a static icon |
 | `defaultDays` | `"7"` | Range shown when the panel opens (`"1"`, `"7"`, or `"30"`) |
+| `refreshMinutes` | `15` | Background fetch cadence in minutes (minimum 2) |
 | `siteLabels` | `{}` | Display-name overrides keyed by the derived label, e.g. `{"blog": "My Blog"}` |
-| `alertDailyViews` | `0` (off) | Notify when a site passes this many views today; a number for all sites or a per-site map like `{"ssp.sh": 4000}` |
-| `alertHourlyViews` | `0` (off) | Same for views in the last 60 minutes |
+| `alertDailyViews` | `0` (off) | Notify when a **single page** passes this many views today; a number for all sites or a per-site map like `{"ssp.sh": 4000}` |
+| `alertHourlyViews` | `0` (off) | Same for a single page's views in the last 60 minutes |
 
 Example:
 
@@ -118,20 +122,35 @@ Example:
 }
 ```
 
-Alerts are checked on every background refresh (15 min) and deduplicated per
-day / per hour, so a viral day produces one daily notification and at most
-one hourly notification per hour while the spike lasts.
+Alerts fire when a single page crosses the threshold (the viral signal —
+site-wide totals would trigger on normal baseline traffic). The notification
+names the page, e.g. `/brain/silo — 54 views in the last hour`, and clicking
+it opens the GoatCounter dashboard filtered to that page. Checked on every
+background refresh (15 min) and deduplicated per day / per hour, so a viral
+day produces one daily notification and at most one hourly notification per
+hour while the spike lasts.
 
 ## How it works
 
-`fetch.sh` queries the GoatCounter API: `/api/v0/stats/total` once per day
-for the last 30 days (the endpoint has no per-day breakdown; the 7-day view
-is the tail of the same series), `/stats/hits` for top pages, and
-`/stats/{toprefs,locations,systems,languages}` for the lists — each for both
-ranges. Calls are spaced to respect the ~4 req/s rate limit. Date ranges are
-sent as full RFC3339 timestamps because date-only ranges return partial
-data. The combined JSON is cached at
-`~/.local/state/omarchy/goatcounter/stats.json` (mode 600).
+`fetch.sh` queries the GoatCounter API: `/api/v0/stats/total` per day and
+per hour (the endpoint has no built-in breakdown; the 7-day view is the tail
+of the 30-day series), `/stats/hits` for top pages, and
+`/stats/{toprefs,locations,systems,languages}` for the lists — per range.
+Refreshes are incremental: past days and past hours never change, so they
+are reused from the cache and only the current day/hour plus the aggregate
+lists are re-fetched — a refresh transfers on the order of 100 KB. Calls are
+spaced to respect the ~4 req/s rate limit, retry time is capped so a slow
+Retry-After can't stall a refresh, and the API token is passed to curl via
+stdin so it never appears in the process list. Date ranges are sent as full
+RFC3339 timestamps because date-only ranges return partial data — and as
+LOCAL wall-clock times, because GoatCounter ignores the timezone suffix and
+interprets clock times in the site's own timezone (keep your site timezone
+matching your machine's). The API's aggregates also trail live traffic by
+up to ~2 hours, so the most recent hourly bars start low and fill in as
+GoatCounter catches up; recent periods are refetched until final. The
+combined JSON is cached at `~/.local/state/omarchy/goatcounter/stats.json`
+(mode 600); on a transient API failure a site keeps its last good data,
+marked `stale`, instead of going blank.
 
 The UI only uses theme colors (`bar.foreground`, `Color.accent`, `Style.*`),
 so it follows the active Omarchy theme automatically, including live theme
