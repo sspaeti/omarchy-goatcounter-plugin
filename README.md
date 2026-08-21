@@ -97,6 +97,24 @@ folder too for a full cleanup. Your secrets file is never touched.
 IPC: `omarchy-shell shell toggle io.github.sspaeti.goatcounter` — bind it in
 Hyprland, e.g. `o.bind("SUPER + CTRL + G", "GoatCounter stats", "omarchy-shell shell toggle io.github.sspaeti.goatcounter")`.
 
+## Known limitation: the last ~2 hours read low
+
+GoatCounter's **API** serves aggregated stats that trail live traffic by up
+to ~2 hours — the most recent hourly bars (and today's tail) can show 0 even
+while the GoatCounter dashboard already displays those visits, because the
+dashboard includes not-yet-aggregated hits and the API does not. This is
+server-side; no client can read those numbers earlier.
+
+The plugin compensates by refetching every not-yet-final period on each
+refresh, so recent bars fill in automatically as GoatCounter catches up.
+Practical consequences:
+
+- The `1d` view's last 1–2 bars lag reality, then self-correct.
+- For the freshest numbers of the current hour, use the dashboard (the `󰏌`
+  button or `o`). Anything older than ~2 hours matches it exactly.
+- The hourly viral alert reads the same lagging data, so it can fire
+  roughly an hour or two after the spike actually started.
+
 ## Settings
 
 All optional, on the widget entry in `shell.json`:
