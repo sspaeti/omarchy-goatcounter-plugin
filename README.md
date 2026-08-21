@@ -93,8 +93,18 @@ folder too for a full cleanup. Your secrets file is never touched.
 | `p` | Cycle through site tabs |
 | `1` / `2` / `3` | Switch to today (hourly) / 7 days / 30 days |
 | `o` | Open the active site's GoatCounter dashboard |
+| `/` | Fuzzy-search pages with their view counts for the current range — type to filter, `Enter` opens the best match in the dashboard, `Esc` closes the box |
 | `Esc` | Close the panel |
 | `Tab` / `Shift+Tab` | Switch to the neighboring bar panel (shell default) |
+
+The `/` search covers the site's **full page list** (up to 1000 pages,
+including page titles). The list is tiny (~150 KB), fetched only when you
+first search a site, and cached on disk for 6 hours — background refreshes
+stay small. Typing matches locally; view counts for the visible matches are
+then fetched in one small targeted call (~15 KB) per site+range and cached,
+and equal-quality matches re-rank by view count as counts arrive. A page
+created after the cache was built appears in search once the 6h cache
+expires.
 
 IPC: `omarchy-shell shell toggle io.github.sspaeti.goatcounter` — bind it in
 Hyprland, e.g. `o.bind("SUPER + CTRL + G", "GoatCounter stats", "omarchy-shell shell toggle io.github.sspaeti.goatcounter")`.
