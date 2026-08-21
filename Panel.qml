@@ -168,6 +168,18 @@ Panel {
       anchors.fill: parent
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      // p: next site tab · 1/2/3: range 1d/7d/30d · o: open the dashboard.
+      onTextKey: function(t) {
+        if (t === "p" && root.sites.length > 0) {
+          root.siteIndex = (root.siteIndex + 1) % root.sites.length
+        } else if (t === "1" || t === "2" || t === "3") {
+          root.hoverDay = -1
+          root.rangeKey = t === "1" ? "1" : (t === "2" ? "7" : "30")
+        } else if (t === "o" && root.activeSiteUrl !== "" && root.bar) {
+          root.bar.run("omarchy-launch-browser " + Util.shellQuote(root.activeSiteUrl))
+          root.close()
+        }
+      }
 
       Column {
         id: mainCol
@@ -227,7 +239,7 @@ Panel {
             }
 
             Repeater {
-              model: [{ key: "7", label: "7d" }, { key: "30", label: "30d" }]
+              model: [{ key: "1", label: "1d" }, { key: "7", label: "7d" }, { key: "30", label: "30d" }]
 
               Rectangle {
                 required property var modelData
@@ -262,27 +274,63 @@ Panel {
             }
           }
 
-          Column {
+          Row {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(1)
+            spacing: Style.space(8)
 
-            Text {
-              anchors.right: parent.right
-              text: root.ready
-                ? Model.fmtCount(root.range.total) + " views · " + root.rangeKey + " days" : ""
-              color: root.fg
-              font.family: root.fontFam
-              font.pixelSize: Style.font.body
-              font.bold: true
+            Column {
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(1)
+
+              Text {
+                anchors.right: parent.right
+                text: root.ready
+                  ? Model.fmtCount(root.range.total) + " views · "
+                    + (root.rangeKey === "1" ? "today" : root.rangeKey + " days")
+                  : ""
+                color: root.fg
+                font.family: root.fontFam
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+              Text {
+                anchors.right: parent.right
+                text: root.data && root.data.fetched
+                  ? "updated " + Model.updatedLabel(root.data.fetched) : ""
+                color: Qt.darker(root.fg, 1.5)
+                font.family: root.fontFam
+                font.pixelSize: Style.font.caption
+              }
             }
-            Text {
-              anchors.right: parent.right
-              text: root.data && root.data.fetched
-                ? "updated " + Model.updatedLabel(root.data.fetched) : ""
-              color: Qt.darker(root.fg, 1.5)
-              font.family: root.fontFam
-              font.pixelSize: Style.font.caption
+
+            // Opens the active site's GoatCounter dashboard in the browser.
+            Rectangle {
+              visible: root.activeSiteUrl !== ""
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(26)
+              height: Style.space(26)
+              radius: Style.space(6)
+              color: linkMouse.containsMouse ? Qt.alpha(Color.accent, 0.25)
+                   : Qt.alpha(root.fg, 0.06)
+
+              Text {
+                anchors.centerIn: parent
+                text: "󰏌"
+                color: linkMouse.containsMouse ? root.fg : Qt.darker(root.fg, 1.3)
+                font.family: root.fontFam
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              MouseArea {
+                id: linkMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: {
+                  if (root.bar && root.activeSiteUrl !== "")
+                    root.bar.run("omarchy-launch-browser " + Util.shellQuote(root.activeSiteUrl))
+                }
+              }
             }
           }
         }
@@ -319,10 +367,12 @@ Panel {
               required property int index
               readonly property real count: Number(modelData.count) || 0
               readonly property bool hot: index === root.hoverDay
-              // In the 30-day view labels only fit on hover (counts) and on
-              // weekly ticks aligned to today (dates).
+              // In the dense views labels only fit on hover (counts) and on
+              // ticks aligned to the last bar: every 3 hours today, weekly
+              // over 30 days.
               readonly property bool compact: root.days.length > 7
-              readonly property bool axisTick: !compact || (root.days.length - 1 - index) % 7 === 0
+              readonly property int tickStep: root.rangeKey === "1" ? 3 : 7
+              readonly property bool axisTick: !compact || (root.days.length - 1 - index) % tickStep === 0
               width: root.chartBarW
               spacing: Style.space(4)
 

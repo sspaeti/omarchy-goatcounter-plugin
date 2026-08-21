@@ -124,7 +124,20 @@ fetch_site() { # label url token
       '$a + [{day: $day, count: ($t.total // 0)}]')
   done
 
-  local lists7 lists30
+  # Today as hourly bars: one total call per elapsed hour.
+  local hours="[]" h H hs he
+  H=$(date +%-H)
+  for ((h = 0; h <= H; h++)); do
+    hs=$(date -u -d "$today $h:00:00" +%FT%TZ)
+    he=$(date -u -d "$today $h:59:59" +%FT%TZ)
+    t=$(api "$url" "$token" "stats/total?start=$hs&end=$he") \
+      || { site_error "$label" "$url"; return; }
+    hours=$(jq -n --argjson a "$hours" --arg day "$(printf '%02d:00' "$h")" --argjson t "$t" \
+      '$a + [{day: $day, count: ($t.total // 0)}]')
+  done
+
+  local lists1 lists7 lists30
+  lists1=$(fetch_lists "$url" "$token" "$(day_start_utc "$today")" "$now") &&
   lists7=$(fetch_lists "$url" "$token" "$(day_start_utc "$(date -d '6 days ago' +%F)")" "$now") &&
   lists30=$(fetch_lists "$url" "$token" "$(day_start_utc "$(date -d '29 days ago' +%F)")" "$now") \
     || { site_error "$label" "$url"; return; }
@@ -150,10 +163,12 @@ fetch_site() { # label url token
   fi
 
   jq -n --arg label "$label" --arg url "$url" \
-    --argjson days30 "$days30" --argjson lists7 "$lists7" --argjson lists30 "$lists30" '
+    --argjson hours "$hours" --argjson days30 "$days30" \
+    --argjson lists1 "$lists1" --argjson lists7 "$lists7" --argjson lists30 "$lists30" '
     ($days30[-7:]) as $days7 |
     {label: $label, url: $url,
      ranges: {
+       "1":  ({total: ($hours  | map(.count) | add // 0), days: $hours}  + $lists1),
        "7":  ({total: ($days7  | map(.count) | add // 0), days: $days7}  + $lists7),
        "30": ({total: ($days30 | map(.count) | add // 0), days: $days30} + $lists30)
      }}'

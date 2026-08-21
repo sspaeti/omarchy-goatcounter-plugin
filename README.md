@@ -75,9 +75,21 @@ folder too for a full cleanup. Your secrets file is never touched.
 
 - **Hover** the bar icon: weekly totals for all sites ("ssp.sh 14k · blog 456")
 - **Left click**: open the stats panel; click the tabs to switch sites and
-  the `7d` / `30d` pills to switch the time range
+  the `1d` / `7d` / `30d` pills to switch the time range (1d shows today as
+  hourly bars)
 - **Middle click**: force a refresh
-- **Right click**: open the active site's GoatCounter dashboard in the browser
+- **Right click**: open the active site's GoatCounter dashboard in the
+  browser — same as the `󰏌` link button in the panel's top-right corner
+
+### Keyboard shortcuts (panel open)
+
+| Key | Action |
+|-----|--------|
+| `p` | Cycle through site tabs |
+| `1` / `2` / `3` | Switch to today (hourly) / 7 days / 30 days |
+| `o` | Open the active site's GoatCounter dashboard |
+| `Esc` | Close the panel |
+| `Tab` / `Shift+Tab` | Switch to the neighboring bar panel (shell default) |
 
 IPC: `omarchy-shell shell toggle io.github.sspaeti.goatcounter` — bind it in
 Hyprland, e.g. `o.bind("SUPER + CTRL + G", "GoatCounter stats", "omarchy-shell shell toggle io.github.sspaeti.goatcounter")`.
@@ -90,7 +102,7 @@ All optional, on the widget entry in `shell.json`:
 |---------|---------|-------------|
 | `icon` | `󰄨` | Bar icon |
 | `hoverExpand` | `true` | Expand the pill with weekly totals on hover; `false` keeps it a static icon |
-| `defaultDays` | `"7"` | Range shown when the panel opens (`"7"` or `"30"`) |
+| `defaultDays` | `"7"` | Range shown when the panel opens (`"1"`, `"7"`, or `"30"`) |
 | `siteLabels` | `{}` | Display-name overrides keyed by the derived label, e.g. `{"blog": "My Blog"}` |
 | `alertDailyViews` | `0` (off) | Notify when a site passes this many views today; a number for all sites or a per-site map like `{"ssp.sh": 4000}` |
 | `alertHourlyViews` | `0` (off) | Same for views in the last 60 minutes |
