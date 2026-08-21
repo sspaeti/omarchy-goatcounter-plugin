@@ -3,9 +3,9 @@
 #
 # Credentials stay out of the dotfiles repo: sites are auto-discovered from
 # GOATCOUNTER_URL / GOATCOUNTER_TOKEN plus any GOATCOUNTER_URL_<NAME> /
-# GOATCOUNTER_TOKEN_<NAME> pairs in the secrets file. Only the GOATCOUNTER_*
-# assignment lines are eval'd, never the whole file, and tokens are never
-# printed.
+# GOATCOUNTER_TOKEN_<NAME> pairs in the secrets file. The GOATCOUNTER_*
+# assignment lines are parsed literally (never eval'd — no shell syntax in
+# values is ever executed), and tokens are never printed.
 #
 # Usage: fetch.sh [--cached] [--alert-daily N|JSON] [--alert-hourly N|JSON]
 #   --cached        print cache when younger than TTL, else refresh
@@ -40,8 +40,26 @@ if (( cached )) && [[ -f "$CACHE" ]]; then
   fi
 fi
 
+# Parse GOATCOUNTER_* assignments WITHOUT eval: eval would execute shell
+# syntax in the value (command substitutions, chained commands) on every
+# background refresh. Values are taken literally — one level of surrounding
+# quotes is stripped, an unquoted value ends at the first whitespace, and no
+# expansion of any kind is performed.
 if [[ -r "$SECRETS" ]]; then
-  eval "$(grep -E '^[[:space:]]*(export[[:space:]]+)?GOATCOUNTER_[A-Z0-9_]+=' "$SECRETS")"
+  while IFS= read -r _line; do
+    [[ "$_line" =~ ^[[:space:]]*(export[[:space:]]+)?(GOATCOUNTER_[A-Z0-9_]+)=(.*)$ ]] || continue
+    _name="${BASH_REMATCH[2]}"
+    _val="${BASH_REMATCH[3]}"
+    if [[ "$_val" =~ ^\"([^\"]*)\" ]]; then
+      _val="${BASH_REMATCH[1]}"
+    elif [[ "$_val" =~ ^\'([^\']*)\' ]]; then
+      _val="${BASH_REMATCH[1]}"
+    else
+      _val="${_val%%[[:space:]]*}"
+    fi
+    printf -v "$_name" '%s' "$_val"
+  done <"$SECRETS"
+  unset _line _name _val
 fi
 
 # Date-only start/end is unreliable (start==end returns partial data), so

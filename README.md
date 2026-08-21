@@ -48,8 +48,10 @@ export GOATCOUNTER_TOKEN_BLOG="..."
 ```
 
 Sites are auto-discovered from these pairs — no plugin config needed. The
-fetch script evals only the `GOATCOUNTER_*` assignment lines from that file,
-never the whole file, and never prints tokens.
+fetch script reads only the `GOATCOUNTER_*` assignment lines from that
+file and parses them literally — values are never evaluated as shell (no
+command substitution or expansion runs), and tokens are never printed.
+A value is taken up to the first whitespace unless it is quoted.
 
 ### 3. Install
 
