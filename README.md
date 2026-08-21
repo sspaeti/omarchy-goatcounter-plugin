@@ -1,5 +1,7 @@
 # Omarchy GoatCounter Plugin
 
+https://github.com/user-attachments/assets/72a461a7-4653-4253-9a78-d0c52d01c37b
+
 [GoatCounter](https://www.goatcounter.com/) analytics in the Omarchy bar: a
 chart icon that expands to your weekly totals on hover, and a popup with a
 7-day or 30-day pageview bar chart, top pages, and top referrers, locations,
