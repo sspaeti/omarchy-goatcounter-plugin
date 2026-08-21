@@ -102,7 +102,7 @@ including page titles). The list is tiny (~150 KB), fetched only when you
 first search a site, and cached on disk for 6 hours — background refreshes
 stay small. Typing matches locally; view counts for the visible matches are
 then fetched in one small targeted call (~15 KB) per site+range and cached,
-and equal-quality matches re-rank by view count as counts arrive. A page
+and equal-quality matches re-rank by view count as counts arrive; pages with zero views in the selected range are hidden from the results. A page
 created after the cache was built appears in search once the 6h cache
 expires.
 

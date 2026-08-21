@@ -245,6 +245,13 @@ Panel {
     keyCatcher.forceActiveFocus()
   }
 
+  // Enter target: best match that is not hidden as zero-count.
+  function searchBestPath() {
+    for (var i = 0; i < sortedMatches.length; i++)
+      if (countFor(sortedMatches[i].name) !== 0) return sortedMatches[i].name
+    return ""
+  }
+
   function searchOpenPage(path) {
     if (root.bar && activeSiteUrl !== "" && path)
       root.bar.run("omarchy-launch-browser " + Util.shellQuote(activeSiteUrl + "/?filter=" + path))
@@ -607,8 +614,8 @@ Panel {
               clip: true
               onTextChanged: countsDebounce.restart()
               Keys.onEscapePressed: root.closeSearch()
-              Keys.onReturnPressed: root.searchOpenPage(root.sortedMatches.length ? root.sortedMatches[0].name : "")
-              Keys.onEnterPressed: root.searchOpenPage(root.sortedMatches.length ? root.sortedMatches[0].name : "")
+              Keys.onReturnPressed: root.searchOpenPage(root.searchBestPath())
+              Keys.onEnterPressed: root.searchOpenPage(root.searchBestPath())
 
               Text {
                 visible: searchField.text === ""
@@ -638,7 +645,11 @@ Panel {
               required property var modelData
               required property int index
               width: root.contentW
-              height: root.listRowH
+              // Pages with no views in the selected range are hidden once
+              // their count comes back as zero.
+              readonly property bool dead: root.countFor(modelData.name) === 0
+              visible: !dead
+              height: dead ? 0 : root.listRowH
 
               Rectangle {
                 anchors.fill: parent
