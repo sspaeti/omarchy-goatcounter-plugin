@@ -18,6 +18,7 @@ Hover Preview:
 ![preview hover](preview-hover.png)
 
 Viral notification:
+
 ![viral notification](viral-notification.png)
 
 
