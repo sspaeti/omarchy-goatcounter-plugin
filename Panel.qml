@@ -169,7 +169,7 @@ Panel {
 
   readonly property var topPages: ready ? (range.toppages || []) : []
 
-  // ---- On-demand page search ("/"): the site's full path list (up to 1000
+  // ---- On-demand page search ("/"): the site's full path list (up to 10000
   //      pages, ~150 KB, 6h disk cache) is fetched once; typing matches
   //      locally over ALL pages, and view counts for the visible matches are
   //      fetched per site+range in a small targeted call as you type.
@@ -246,10 +246,10 @@ Panel {
   }
 
   // Enter target: best match that is not hidden as zero-count.
-  function searchBestPath() {
+  function searchBestMatch() {
     for (var i = 0; i < sortedMatches.length; i++)
-      if (countFor(sortedMatches[i].name) !== 0) return sortedMatches[i].name
-    return ""
+      if (countFor(sortedMatches[i].name) !== 0) return sortedMatches[i]
+    return null
   }
 
   function searchOpenPage(path) {
@@ -258,8 +258,110 @@ Panel {
     closeSearch()
   }
 
-  onRangeKeyChanged: if (searchOpen) countsDebounce.restart()
-  onSiteIndexChanged: if (searchOpen) { ensurePaths(); countsDebounce.restart() }
+  function searchHighlight(match) {
+    if (match) selectPage(match.id, match.name)
+    closeSearch()
+  }
+
+  // ---- Page highlight: clicking a Top Pages row (or Enter in "/" search)
+  //      overlays that page's share on each chart bar, keeping the full
+  //      totals. The page's per-day series is fetched on demand, same
+  //      pattern as the search counts.
+  property var selectedPage: null    // {id, name}
+  property var seriesCache: ({})     // "label|range|id" -> {dayKey: count}
+  property string seriesError: ""
+  property string pendingSelectName: ""
+
+  readonly property var pageSeries: {
+    void seriesCache
+    if (!selectedPage || !site) return null
+    var v = seriesCache[site.label + "|" + rangeKey + "|" + selectedPage.id]
+    return v === undefined ? null : v
+  }
+
+  readonly property real selectedTotal: {
+    if (!pageSeries) return -1
+    var t = 0
+    for (var i = 0; i < days.length; i++)
+      t += Number(pageSeries[days[i].day]) || 0
+    return t
+  }
+
+  function selectPage(id, name) {
+    if (selectedPage && selectedPage.id === id) { clearSelection(); return }
+    seriesError = ""
+    selectedPage = { id: id, name: name }
+    ensureSeries()
+  }
+
+  function clearSelection() {
+    selectedPage = null
+    pendingSelectName = ""
+    seriesError = ""
+  }
+
+  function ensureSeries() {
+    if (!selectedPage || !site || seriesProc.running) return
+    var key = site.label + "|" + rangeKey + "|" + selectedPage.id
+    if (seriesCache[key] !== undefined) return
+    seriesProc.cacheKey = key
+    seriesProc.command = ["bash", scriptPath(), "--series",
+      String(site.label), String(rangeKey), String(selectedPage.id)]
+    seriesProc.running = true
+  }
+
+  // Top Pages rows only carry the path name; resolve it to a path id via the
+  // same cached paths list the "/" search uses (fetched here if needed).
+  function selectByName(name) {
+    if (selectedPage && selectedPage.name === name) { clearSelection(); return }
+    var paths = site ? sitePaths[site.label] : null
+    if (paths) {
+      for (var i = 0; i < paths.length; i++)
+        if (paths[i].path === name) { selectPage(paths[i].id, name); return }
+      seriesError = "page not in cached path list"
+      return
+    }
+    pendingSelectName = name
+    ensurePaths()
+  }
+
+  Process {
+    id: seriesProc
+    property string cacheKey: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var v = JSON.parse(String(text || ""))
+          if (v.error) {
+            root.seriesError = Model.plainText(v.error)
+            return
+          }
+          var per = {}
+          var rows = (v && v.series) ? v.series : []
+          for (var i = 0; i < rows.length; i++)
+            per[rows[i].day] = Number(rows[i].count) || 0
+          var m = {}
+          for (var k in root.seriesCache) m[k] = root.seriesCache[k]
+          m[seriesProc.cacheKey] = per
+          root.seriesCache = m
+        } catch (e) {
+          root.seriesError = "could not load page series"
+        }
+        // Range/site may have changed while this was in flight.
+        Qt.callLater(root.ensureSeries)
+      }
+    }
+  }
+
+  onRangeKeyChanged: {
+    if (searchOpen) countsDebounce.restart()
+    ensureSeries()
+  }
+  onSiteIndexChanged: {
+    clearSelection()
+    if (searchOpen) { ensurePaths(); countsDebounce.restart() }
+  }
 
   Timer {
     id: countsDebounce
@@ -287,6 +389,12 @@ Panel {
           // The user may have switched site while this was in flight.
           if (root.searchOpen && root.site && !root.sitePaths[root.site.label])
             root.ensurePaths()
+          // A Top Pages click that was waiting on the path list.
+          if (root.pendingSelectName !== "") {
+            var pending = root.pendingSelectName
+            root.pendingSelectName = ""
+            root.selectByName(pending)
+          }
           countsDebounce.restart()
         } catch (e) {
           root.searchError = "could not load page list"
@@ -405,7 +513,11 @@ Panel {
       anchors.fill: parent
       // While the search box has focus, hand every key to it.
       blocked: searchField.activeFocus
-      onCloseRequested: root.close()
+      // Esc peels the page highlight off first, then closes the panel.
+      onCloseRequested: {
+        if (root.selectedPage) root.clearSelection()
+        else root.close()
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       // p: next site tab · 1/2/3: range 1d/7d/30d · o: open dashboard ·
       // /: fuzzy page search.
@@ -614,13 +726,27 @@ Panel {
               clip: true
               onTextChanged: countsDebounce.restart()
               Keys.onEscapePressed: root.closeSearch()
-              Keys.onReturnPressed: root.searchOpenPage(root.searchBestPath())
-              Keys.onEnterPressed: root.searchOpenPage(root.searchBestPath())
+              // Enter highlights the best match in the chart; Ctrl+Enter
+              // opens it in the GoatCounter dashboard instead.
+              Keys.onReturnPressed: function(event) {
+                var best = root.searchBestMatch()
+                if (event.modifiers & Qt.ControlModifier)
+                  root.searchOpenPage(best ? best.name : "")
+                else
+                  root.searchHighlight(best)
+              }
+              Keys.onEnterPressed: function(event) {
+                var best = root.searchBestMatch()
+                if (event.modifiers & Qt.ControlModifier)
+                  root.searchOpenPage(best ? best.name : "")
+                else
+                  root.searchHighlight(best)
+              }
 
               Text {
                 visible: searchField.text === ""
                 anchors.verticalCenter: parent.verticalCenter
-                text: "search pages…   Enter: open best match in dashboard · Esc: close"
+                text: "search pages…   Enter: highlight in chart · Ctrl+Enter: open dashboard · Esc: close"
                 color: Qt.darker(root.fg, 1.6)
                 font.family: root.fontFam
                 font.pixelSize: Style.font.bodySmall
@@ -689,7 +815,12 @@ Panel {
 
               MouseArea {
                 anchors.fill: parent
-                onClicked: root.searchOpenPage(resRow.modelData.name)
+                onClicked: function(mouse) {
+                  if (mouse.modifiers & Qt.ControlModifier)
+                    root.searchOpenPage(resRow.modelData.name)
+                  else
+                    root.searchHighlight(resRow.modelData)
+                }
               }
             }
           }
@@ -697,7 +828,7 @@ Panel {
           Text {
             visible: !root.searchLoading && root.searchError === ""
               && searchField.text !== "" && root.searchMatches.length === 0
-            text: "no matching page (first 1000 pages searched)"
+            text: "no matching page"
             color: Qt.darker(root.fg, 1.5)
             font.family: root.fontFam
             font.pixelSize: Style.font.caption
@@ -723,6 +854,44 @@ Panel {
           font.italic: true
         }
 
+        // ---- Active page highlight: which page is overlaid on the bars.
+        Row {
+          visible: root.ready && root.selectedPage !== null
+          spacing: Style.space(6)
+
+          Rectangle {
+            width: chipText.implicitWidth + Style.space(20)
+            height: chipText.implicitHeight + Style.space(8)
+            radius: height / 2
+            color: Qt.alpha(Color.accent, chipMouse.containsMouse ? 0.35 : 0.22)
+
+            Text {
+              id: chipText
+              anchors.centerIn: parent
+              text: {
+                if (!root.selectedPage) return ""
+                var name = Model.plainText(root.selectedPage.name)
+                if (root.seriesError !== "") return name + " — " + root.seriesError + "  ✕"
+                if (root.selectedTotal < 0) return name + " — loading…  ✕"
+                return name + " — " + Model.fmtCount(root.selectedTotal)
+                  + " of " + Model.fmtCount(root.range.total) + "  ✕"
+              }
+              textFormat: Text.PlainText
+              color: root.fg
+              font.family: root.fontFam
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            MouseArea {
+              id: chipMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              onClicked: root.clearSelection()
+            }
+          }
+        }
+
         // ---- 7-day bar chart: count above, bar, weekday below.
         Row {
           visible: root.ready
@@ -744,6 +913,12 @@ Panel {
               readonly property real deltaH: count > 0 && delta > 0
                 ? Math.max(Style.space(2), barH * Math.min(1, delta / count))
                 : 0
+              // Selected page's share of this bar, drawn bottom-up.
+              readonly property real pageCount: root.pageSeries
+                ? (Number(root.pageSeries[modelData.day]) || 0) : 0
+              readonly property real pageH: pageCount > 0 && count > 0
+                ? Math.max(Style.space(2), barH * Math.min(1, pageCount / count))
+                : 0
               // In the dense views labels only fit on hover (counts) and on
               // ticks aligned to the last bar: every 3 hours today, weekly
               // over 30 days.
@@ -756,7 +931,10 @@ Panel {
               Text {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
-                text: (!dayCol.compact || dayCol.hot) ? Model.fmtCount(dayCol.count) : " "
+                // With a page highlighted, hover shows its share of the day.
+                text: root.pageSeries && dayCol.hot
+                  ? Model.fmtCount(dayCol.pageCount) + "/" + Model.fmtCount(dayCol.count)
+                  : ((!dayCol.compact || dayCol.hot) ? Model.fmtCount(dayCol.count) : " ")
                 color: dayCol.hot ? Color.accent : Qt.darker(root.fg, 1.4)
                 font.family: root.fontFam
                 font.pixelSize: Style.font.caption
@@ -773,13 +951,30 @@ Panel {
                   width: parent.width
                   height: dayCol.barH
                   radius: Style.space(3)
-                  color: Qt.alpha(Color.accent, dayCol.hot ? 0.8 : 0.45)
+                  // Dimmed while a page highlight is active, so the page's
+                  // share stands out against the full total.
+                  color: Qt.alpha(Color.accent, root.selectedPage
+                    ? (dayCol.hot ? 0.30 : 0.18)
+                    : (dayCol.hot ? 0.8 : 0.45))
+                }
+
+                // Selected page's share of the day, bottom-anchored inside
+                // the (dimmed) total bar.
+                Rectangle {
+                  visible: dayCol.pageH > 0
+                  anchors.bottom: parent.bottom
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  width: parent.width
+                  height: dayCol.pageH
+                  radius: Style.space(3)
+                  color: Qt.alpha(Color.accent, dayCol.hot ? 1.0 : 0.85)
                 }
 
                 // Views that arrived since the panel was last open, stacked
-                // as a brighter cap on top of the bar.
+                // as a brighter cap on top of the bar (hidden while a page
+                // highlight is active — one overlay at a time).
                 Rectangle {
-                  visible: dayCol.deltaH > 0
+                  visible: dayCol.deltaH > 0 && !root.selectedPage
                   anchors.bottom: parent.bottom
                   anchors.bottomMargin: dayCol.barH - dayCol.deltaH
                   anchors.horizontalCenter: parent.horizontalCenter
@@ -831,6 +1026,8 @@ Panel {
               id: pageRow
               required property var modelData
               readonly property real maxRow: Model.maxCount(root.topPages)
+              readonly property bool selected: root.selectedPage !== null
+                && root.selectedPage.name === modelData.name
               width: root.contentW
               height: root.listRowH
 
@@ -841,7 +1038,17 @@ Panel {
                   : 0
                 height: parent.height
                 radius: Style.space(3)
-                color: Qt.alpha(Color.accent, 0.16)
+                color: Qt.alpha(Color.accent, pageRow.selected ? 0.40
+                  : pageRowMouse.containsMouse ? 0.26 : 0.16)
+              }
+
+              // Click toggles the chart highlight for this page.
+              MouseArea {
+                id: pageRowMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.selectByName(pageRow.modelData.name)
               }
 
               Text {

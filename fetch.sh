@@ -12,8 +12,10 @@
 #   --alert-daily   notify when a site passes N views today (or per-site map
 #                   like '{"ssp.sh": 3000}'); 0 disables
 #   --alert-hourly  same for views in the last 60 minutes
-#   --paths <label>            print the site's page list (≤1000, 6h cache)
+#   --paths <label>            print the site's page list (≤10000, 6h cache)
 #   --counts <label> <1|7|30> <id,..>  print view counts for those page ids
+#   --series <label> <1|7|30> <id>     print one page's per-day (per-hour for
+#                                      range 1) counts for the chart overlay
 set -uo pipefail
 
 SECRETS="${GOATCOUNTER_SECRETS:-$HOME/.dotfiles/zsh/.secrets}"
@@ -28,6 +30,7 @@ MAX_RESP=$((5 * 1024 * 1024))
 
 cached=0 alert_daily=0 alert_hourly=0
 paths_label="" counts_label="" counts_range="" counts_ids=""
+series_label="" series_range="" series_id=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cached) cached=1; shift ;;
@@ -35,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --alert-hourly) alert_hourly=${2:-0}; shift 2 ;;
     --paths) paths_label=${2:-}; shift 2 ;;
     --counts) counts_label=${2:-}; counts_range=${3:-30}; counts_ids=${4:-}; shift 4 ;;
+    --series) series_label=${2:-}; series_range=${3:-30}; series_id=${4:-}; shift 4 ;;
     *) shift ;;
   esac
 done
@@ -139,10 +143,11 @@ range_start() { # 1|7|30 -> range start timestamp
   esac
 }
 
-# ---- "--paths <label>": print the site's path list (up to 1000 pages) as
-#      {paths: [{id, path, title}]} and exit. The list is small (~150 bytes
-#      per path) and cached on disk for 6 hours; the panel's "/" search
-#      fuzzy-matches against it locally.
+# ---- "--paths <label>": print the site's FULL path list (up to 10000
+#      pages, 50 API calls — the endpoint pages by id, so stopping early
+#      would silently drop the newest pages) as {paths: [{id, path, title}]}
+#      and exit. The list is small (~150 bytes per path) and cached on disk
+#      for 6 hours; the panel's "/" search fuzzy-matches against it locally.
 if [[ -n "$paths_label" ]]; then
   resolve_site "$paths_label" || { jq -n '{error: "unknown site"}'; exit 0; }
   PCACHE="$STATE_DIR/paths-$paths_label.json"
@@ -150,14 +155,17 @@ if [[ -n "$paths_label" ]]; then
     cat "$PCACHE"
     exit 0
   fi
-  all="[]" after=0 truncated=false
-  for _page in 1 2 3 4 5; do
+  # Pages accumulate in a temp file, NOT a shell variable: a growing JSON
+  # blob passed through argv (--argjson) hits E2BIG after a few thousand
+  # paths, and the panel would cache the mangled result.
+  pages=$(mktemp "$STATE_DIR/.pages.XXXXXX")
+  after=0 truncated=false
+  for _page in $(seq 1 50); do
     r=$(api "${s_url%/}" "$s_token" "paths?Limit=200&After=$after") \
-      || { jq -n '{error: "API request failed"}'; exit 0; }
+      || { rm -f "$pages"; jq -n '{error: "API request failed"}'; exit 0; }
     n=$(jq '.paths | length' <<<"$r")
     (( n == 0 )) && break
-    all=$(jq -n --argjson a "$all" --argjson r "$r" \
-      '$a + ($r.paths | map({id, path, title}))')
+    jq -c '.paths | map({id, path, title})' <<<"$r" >>"$pages"
     after=$(jq '.paths[-1].id' <<<"$r")
     if [[ $(jq '.more' <<<"$r") != "true" ]]; then
       truncated=false
@@ -165,12 +173,17 @@ if [[ -n "$paths_label" ]]; then
     fi
     truncated=true
   done
-  out=$(jq -n --argjson p "$all" --argjson t "$truncated" '{paths: $p, truncated: $t}')
   tmp=$(mktemp "$STATE_DIR/.paths.XXXXXX")
-  printf '%s\n' "$out" >"$tmp"
+  if ! jq -s --argjson t "$truncated" '{paths: (add // []), truncated: $t}' \
+      "$pages" >"$tmp" 2>/dev/null; then
+    rm -f "$pages" "$tmp"
+    jq -n '{error: "could not assemble path list"}'
+    exit 0
+  fi
+  rm -f "$pages"
   chmod 600 "$tmp"
   mv "$tmp" "$PCACHE"
-  printf '%s\n' "$out"
+  cat "$PCACHE"
   exit 0
 fi
 
@@ -184,6 +197,31 @@ if [[ -n "$counts_label" ]]; then
     "stats/hits?start=$(range_start "$counts_range")&end=$now&limit=100&include_paths=$counts_ids") \
     || { jq -n '{error: "API request failed"}'; exit 0; }
   jq '{counts: (.hits // [] | map({name: .path, count: .count}))}' <<<"$h"
+  exit 0
+fi
+
+# ---- "--series <label> <range> <id>": print ONE page's per-day counts
+#      (per-hour for range 1) as {series: [{day, count}]} — the panel overlays
+#      them on the total bars. The hits payload narrowed to a single path id
+#      stays tiny.
+if [[ -n "$series_label" ]]; then
+  resolve_site "$series_label" || { jq -n '{error: "unknown site"}'; exit 0; }
+  [[ "$series_id" =~ ^[0-9]+$ ]] || { jq -n '{error: "bad id"}'; exit 0; }
+  h=$(api "${s_url%/}" "$s_token" \
+    "stats/hits?start=$(range_start "$series_range")&end=$now&limit=1&include_paths=$series_id") \
+    || { jq -n '{error: "API request failed"}'; exit 0; }
+  if [[ "$series_range" == "1" ]]; then
+    # Today's hourly array, keyed like the chart's hour labels ("07:00").
+    jq --arg today "$today" \
+      '{series: ((.hits // [])[0].stats // []
+        | map(select(.day == $today)) | ((.[0].hourly) // [])
+        | to_entries
+        | map({day: ((.key | if . < 10 then "0\(.)" else "\(.)" end) + ":00"),
+               count: .value}))}' <<<"$h"
+  else
+    jq '{series: ((.hits // [])[0].stats // []
+      | map({day, count: (.daily // ((.hourly // []) | add // 0))}))}' <<<"$h"
+  fi
   exit 0
 fi
 

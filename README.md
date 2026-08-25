@@ -93,14 +93,25 @@ folder too for a full cleanup. Your secrets file is never touched.
 | `p` | Cycle through site tabs |
 | `1` / `2` / `3` | Switch to today (hourly) / 7 days / 30 days |
 | `o` | Open the active site's GoatCounter dashboard |
-| `/` | Fuzzy-search pages with their view counts for the current range — type to filter, `Enter` opens the best match in the dashboard, `Esc` closes the box |
-| `Esc` | Close the panel |
+| `/` | Fuzzy-search pages with their view counts for the current range — type to filter, `Enter` highlights the best match in the chart, `Ctrl+Enter` opens it in the dashboard, `Esc` closes the box |
+| `Esc` | Clear the page highlight if one is active, otherwise close the panel |
 | `Tab` / `Shift+Tab` | Switch to the neighboring bar panel (shell default) |
 
-The `/` search covers the site's **full page list** (up to 1000 pages,
-including page titles). The list is tiny (~150 KB), fetched only when you
-first search a site, and cached on disk for 6 hours — background refreshes
-stay small. Typing matches locally; view counts for the visible matches are
+### Page highlight
+
+Click a **Top Pages** row (or press `Enter` on a `/` search match) to overlay
+that page's share on the chart: the total bars stay, dimmed, and the page's
+views are drawn in bright accent inside each bar. Hovering a bar shows
+`page/total` for that day. The page's per-day series is fetched on demand in
+one small call per site+range and cached for the session. Click the row (or
+the chip above the chart, or press `Esc`) to clear; switching the time range
+keeps the highlight, switching sites clears it.
+
+The `/` search covers the site's **full page list** (up to 10,000 pages,
+including page titles — paged from the API in creation order, so the newest
+pages are included). The list is small (~150 bytes per page), fetched only
+when you first search a site, and cached on disk for 6 hours — background
+refreshes stay small. Typing matches locally; view counts for the visible matches are
 then fetched in one small targeted call (~15 KB) per site+range and cached,
 and equal-quality matches re-rank by view count as counts arrive; pages with zero views in the selected range are hidden from the results. A page
 created after the cache was built appears in search once the 6h cache
