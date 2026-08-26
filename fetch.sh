@@ -367,11 +367,10 @@ fetch_site() { # label url token
 
   # ---- Viral alerts: fire when a SINGLE PAGE passes the threshold in the
   #      window, not the site total (dedup per day / per hour via markers).
-  check_page_alert() { # window-start marker-key window-label emoji-title thr
-    local ws=$1 marker=$2 wlabel=$3 title=$4 thr=$5 viral n body vpath
-    t=$(api "$url" "$token" "stats/hits?start=$ws&end=$now&limit=10") || return 0
+  evaluate_viral() { # data marker-key window-label emoji-title thr
+    local data=$1 marker=$2 wlabel=$3 title=$4 thr=$5 viral n body vpath
     viral=$(jq -c --argjson thr "$thr" \
-      '[.hits // [] | .[] | select(.count >= $thr)] | sort_by(-.count)' <<<"$t")
+      '[.hits // [] | .[] | select(.count >= $thr)] | sort_by(-.count)' <<<"$data")
     n=$(jq 'length' <<<"$viral")
     (( n == 0 )) && return 0
     body=$(jq -r --arg w "$wlabel" '.[0] | "\(.path) — \(.count) views \($w)"' <<<"$viral")
@@ -380,15 +379,41 @@ fetch_site() { # label url token
     notify_once "$marker" "$title" "$body (threshold $thr)" "$url/?filter=$vpath"
   }
 
+  # Per-page hit stats can lag live traffic: GoatCounter sometimes hasn't
+  # aggregated the in-progress hour yet, so a plain "last 60 minutes" query
+  # comes back empty during a real spike (verified live: a 60-min window read
+  # 0 hits while the same day's total already showed hundreds on the top
+  # page). Walk back from the current hour-aligned bucket until one actually
+  # has data, and alert on THAT bucket — one hour delayed if that's what it
+  # takes, but never blindly trusting an empty "now".
+  resolve_hour_bucket() { # sets hb_data/hb_key on success
+    local back hs_local hb_start hb_end data
+    for back in 0 1 2; do
+      hs_local=$(date -d "$back hours ago" '+%Y-%m-%d %H:00:00')
+      hb_start=$(date -d "$hs_local" +%FT%TZ)
+      if (( back == 0 )); then
+        hb_end=$now
+      else
+        hb_end=$(date -d "$hs_local +1 hour" +%FT%TZ)
+      fi
+      data=$(api "$url" "$token" "stats/hits?start=$hb_start&end=$hb_end&limit=10") || continue
+      if (( $(jq -r '.total // 0' <<<"$data") > 0 )); then
+        hb_data=$data hb_key=$(date -d "$hs_local" +%Y%m%dT%H)
+        return 0
+      fi
+    done
+    return 1
+  }
+
   local thr
   thr=$(threshold_for "$alert_daily" "$label")
   if (( thr > 0 )); then
-    check_page_alert "$(day_start_utc "$today")" "$label-day-$today" \
-      "today" "$label page is going viral 🎉" "$thr"
+    t=$(api "$url" "$token" "stats/hits?start=$(day_start_utc "$today")&end=$now&limit=10") \
+      && evaluate_viral "$t" "$label-day-$today" "today" "$label page is going viral 🎉" "$thr"
   fi
   thr=$(threshold_for "$alert_hourly" "$label")
-  if (( thr > 0 )); then
-    check_page_alert "$(date -d '60 minutes ago' +%FT%TZ)" "$label-hour-$(date +%FT%H)" \
+  if (( thr > 0 )) && resolve_hour_bucket; then
+    evaluate_viral "$hb_data" "$label-hour-$hb_key" \
       "in the last hour" "$label page is spiking 🚀" "$thr"
   fi
 
