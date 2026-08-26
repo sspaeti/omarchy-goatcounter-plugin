@@ -520,7 +520,7 @@ Panel {
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       // p: next site tab · 1/2/3: range 1d/7d/30d · o: open dashboard ·
-      // /: fuzzy page search.
+      // r: force refresh · /: fuzzy page search.
       onTextKey: function(t) {
         if (t === "/") {
           root.openSearch()
@@ -532,6 +532,8 @@ Panel {
         } else if (t === "o" && root.activeSiteUrl !== "" && root.bar) {
           root.bar.run("omarchy-launch-browser " + Util.shellQuote(root.activeSiteUrl))
           root.close()
+        } else if (t === "r" || t === "R") {
+          root.refresh()
         }
       }
 
@@ -659,8 +661,12 @@ Panel {
               }
               Text {
                 anchors.right: parent.right
-                text: root.data && root.data.fetched
-                  ? "updated " + Model.updatedLabel(root.data.fetched) : ""
+                text: {
+                  if (fetchProc.running) return "refreshing…"
+                  if (root.data && root.data.fetched)
+                    return "updated " + Model.updatedLabel(root.data.fetched)
+                  return ""
+                }
                 color: Qt.darker(root.fg, 1.5)
                 font.family: root.fontFam
                 font.pixelSize: Style.font.caption
